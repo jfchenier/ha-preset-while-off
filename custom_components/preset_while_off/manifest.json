@@ -1,0 +1,13 @@
+{
+  "domain": "preset_while_off",
+  "name": "Preset While Off",
+  "codeowners": ["@jfchenier"],
+  "config_flow": true,
+  "dependencies": ["matter"],
+  "documentation": "https://github.com/jfchenier/ha-preset-while-off",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/jfchenier/ha-preset-while-off/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

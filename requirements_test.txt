@@ -1,0 +1,2 @@
+pytest-homeassistant-custom-component==0.13.367  # Home Assistant 2026.9.4
+matter-python-client==1.4.0
