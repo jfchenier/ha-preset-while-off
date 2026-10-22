@@ -31,6 +31,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.util import color as color_util
 
+from .backend import Light, PresetBackend
 from .const import (
     CAP_SUPPORTED,
     CAP_UNKNOWN,
@@ -45,12 +46,7 @@ from .const import (
     STORAGE_VERSION,
     VERIFY_DELAY,
 )
-from .matter_backend import (
-    LightAttributes,
-    MatterBackend,
-    MatterLight,
-    MatterUnavailable,
-)
+from .models import BackendUnavailable, LightAttributes
 
 # Capability parts, tracked separately per light.
 PART_LEVEL = "level"
@@ -158,7 +154,13 @@ def expand_lights(hass: HomeAssistant, entity_ids: Iterable[str]) -> list[str]:
             return
         seen.add(entity_id)
         state = hass.states.get(entity_id)
-        members = state.attributes.get(ATTR_ENTITY_ID) if state else None
+        # Light groups and old-style groups list members in `entity_id`,
+        # ZHA groups in `group_entities`.
+        members = None
+        if state:
+            members = state.attributes.get(ATTR_ENTITY_ID) or state.attributes.get(
+                "group_entities"
+            )
         if isinstance(members, (list, tuple)) and members:
             for member in members:
                 visit(member)
@@ -212,7 +214,7 @@ _KIND_PART = {
 
 @dataclass
 class _Pending:
-    light: MatterLight
+    light: Light
     # (kind, value sent, value before)
     sent: list[tuple[str, Any, Any]]
 
@@ -220,7 +222,7 @@ class _Pending:
 class PresetManager:
     """Apply presets to lights. Shared by the action and all rules."""
 
-    def __init__(self, hass: HomeAssistant, backend: MatterBackend) -> None:
+    def __init__(self, hass: HomeAssistant, backend: PresetBackend) -> None:
         """Initialize."""
         self.hass = hass
         self.backend = backend
@@ -327,7 +329,7 @@ class PresetManager:
                         skip_if_unchanged,
                         result,
                     )
-                except MatterUnavailable as err:
+                except BackendUnavailable as err:
                     result.skipped[entity_id] = f"matter_unavailable: {err}"
                     continue
                 except Exception as err:  # noqa: BLE001 - keep going with other lights
@@ -378,8 +380,8 @@ class PresetManager:
     ) -> _Pending | None:
         light = self.backend.resolve(entity_id)
         if light is None:
-            LOGGER.debug("%s is not a Matter light, skipping", entity_id)
-            result.unsupported[entity_id] = "not_matter"
+            LOGGER.debug("%s is not a Matter or ZHA light, skipping", entity_id)
+            result.unsupported[entity_id] = "unsupported_platform"
             return None
         attrs = self.backend.get_attributes(light)
         if attrs is None or not attrs.available:
@@ -454,7 +456,7 @@ class PresetManager:
             entity_id = item.light.entity_id
             try:
                 attrs = await self.backend.read_attributes(item.light)
-            except MatterUnavailable:
+            except BackendUnavailable:
                 return
             if attrs is None or attrs.on_off:
                 # Turned on meanwhile (or unknown): can't tell, try next time.

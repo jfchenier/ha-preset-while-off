@@ -50,7 +50,7 @@ from .const import (
     STARTUP_RETRY,
     TURN_OFF_DELAY,
 )
-from .matter_backend import MatterUnavailable
+from .models import BackendUnavailable
 from .preset import PresetManager, expand_lights
 
 
@@ -197,10 +197,10 @@ class RuleCoordinator:
     async def _async_startup(self, _now: Any = None) -> None:
         self._startup_timer = None
         if not self.manager.backend.available:
-            LOGGER.debug("Matter not ready, retrying in %ss", STARTUP_RETRY)
+            LOGGER.debug("Matter/ZHA not ready, retrying in %ss", STARTUP_RETRY)
             self._schedule_startup(STARTUP_RETRY)
             return
-        await self._async_ensure_matter()
+        await self._async_ensure_backends()
         await self.async_apply_all()
 
     # --------------------------------------------------------------- applying
@@ -226,7 +226,7 @@ class RuleCoordinator:
         LOGGER.debug("%s: applied %s", self.entry.title, result.as_dict())
 
     async def _async_interval(self, _now: Any) -> None:
-        await self._async_ensure_matter()
+        await self._async_ensure_backends()
         await self.async_apply_all()
 
     @callback
@@ -290,8 +290,8 @@ class RuleCoordinator:
         self._matter_unsubs.clear()
         self._matter_connection = None
 
-    async def _async_ensure_matter(self) -> None:
-        """(Re)subscribe to Matter events and clear OnLevel if enabled."""
+    async def _async_ensure_backends(self) -> None:
+        """(Re)subscribe to backend events and clear OnLevel if enabled."""
         if not self.options.get(CONF_CLEAR_ON_LEVEL, True):
             return
         backend = self.manager.backend
@@ -322,14 +322,16 @@ class RuleCoordinator:
         for entity_id in expand_lights(self.hass, self.lights):
             try:
                 light = backend.resolve(entity_id)
-                if light is None or (node_id is not None and light.node_id != node_id):
+                if light is None or (
+                    node_id is not None and getattr(light, "node_id", None) != node_id
+                ):
                     continue
                 attrs = backend.get_attributes(light)
                 if attrs is None or not attrs.available or not attrs.has_on_level:
                     continue
                 if attrs.on_level is not None:
                     await backend.clear_on_level(light)
-            except MatterUnavailable:
+            except BackendUnavailable:
                 return
             except Exception as err:  # noqa: BLE001
                 LOGGER.warning("Could not clear OnLevel on %s: %s", entity_id, err)

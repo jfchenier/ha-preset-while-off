@@ -139,7 +139,8 @@ async def test_diagnostics(
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
     bulb = diag["lights"]["light.bulb_1"]
-    assert bulb["matter"]["node_id"] == 72
-    assert bulb["matter"]["cached_attributes"]["current_level"] == 64
+    assert bulb["device"]["platform"] == "matter"
+    assert bulb["device"]["node_id"] == 72
+    assert bulb["device"]["cached_attributes"]["current_level"] == 64
     assert bulb["capabilities"] == {"level": "supported", "color_temp": "supported"}
     assert diag["last_source"] == {"brightness_pct": 25.0, "color_temp_kelvin": 4890.0}

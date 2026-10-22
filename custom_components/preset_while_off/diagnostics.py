@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 
 from . import PresetConfigEntry
-from .matter_backend import MatterUnavailable
+from .models import BackendUnavailable
 from .preset import expand_lights
+from .zha_backend import ZhaLight
 
 
 async def async_get_config_entry_diagnostics(
@@ -29,20 +31,23 @@ async def async_get_config_entry_diagnostics(
         try:
             light = backend.resolve(entity_id)
             if light is None:
-                info["matter"] = None
+                info["device"] = None
             else:
                 attrs = backend.get_attributes(light)
-                info["matter"] = {
-                    "node_id": light.node_id,
-                    "endpoint_id": light.endpoint_id,
+                info["device"] = {
+                    "platform": "zha" if isinstance(light, ZhaLight) else "matter",
+                    **{k: v for k, v in asdict(light).items() if k != "entity_id"},
                     "cached_attributes": attrs.as_dict() if attrs else None,
                 }
-        except MatterUnavailable as err:
-            info["matter"] = f"unavailable: {err}"
+        except BackendUnavailable as err:
+            info["device"] = f"unavailable: {err}"
         lights[entity_id] = info
     return {
         "options": {**entry.data, **entry.options},
-        "matter_available": backend.available,
+        "backends_available": {
+            "matter": backend.matter.available,
+            "zha": backend.zha.available,
+        },
         "last_source": coordinator.last_source,
         "lights": lights,
     }

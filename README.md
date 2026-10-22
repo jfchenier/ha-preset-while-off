@@ -10,7 +10,8 @@ It uses the Matter `ExecuteIfOff` option on each command (`MoveToLevel`,
 `Off`, `Toggle` or `MoveToLevelWithOnOff`, and never writes the persistent `Options`
 attributes. **It never turns a light on or off.**
 
-Requires Home Assistant 2026.9+ with the Matter integration. Zigbee/ZHA is not supported.
+Requires Home Assistant 2026.9+ with the Matter integration. Zigbee bulbs are supported
+through ZHA (experimental, see below).
 
 ## Installation
 
@@ -100,6 +101,20 @@ dropping to the level when they turn on. With *Clear OnLevel* on, each rule:
   rewrites it.
 
 If an automation writes `number.*_on_level` for these lights, disable it for them.
+
+## Zigbee (ZHA), experimental
+
+Lights on the ZHA integration work the same way. The commands are the ZCL equivalents
+(`move_to_level`, `move_to_color_temp`, `move_to_color`, `move_to_hue_and_saturation`)
+with `options_mask=1, options_override=1`, sent through HA's own ZHA gateway.
+
+- **Groups:** target the member bulbs or a ZHA group light. ZHA groups are expanded
+  through their `group_entities`.
+- **Support varies:** many Zigbee bulbs (notably older IKEA TRADFRI) ignore
+  ExecuteIfOff for brightness. Capability detection marks them, and no further
+  commands are sent for that part.
+- **OnLevel:** clearing writes `on_level = 0xFF` (null). ZHA doesn't push `on_level`
+  changes, so rewrites are caught on the safety interval rather than right away.
 
 ## Capability detection
 

@@ -15,6 +15,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.service import async_extract_entity_ids
 from homeassistant.helpers.typing import ConfigType
 
+from .backend import PresetBackend
 from .const import (
     ATTR_APPLY_IF_ON,
     ATTR_BRIGHTNESS,
@@ -27,7 +28,6 @@ from .const import (
     SERVICE_APPLY,
 )
 from .coordinator import RuleCoordinator
-from .matter_backend import MatterBackend
 from .preset import (
     ColorPreset,
     PresetManager,
@@ -95,7 +95,7 @@ def get_manager(hass: HomeAssistant) -> PresetManager:
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the shared manager and the actions."""
-    manager = PresetManager(hass, MatterBackend(hass))
+    manager = PresetManager(hass, PresetBackend(hass))
     await manager.async_load()
     hass.data[DOMAIN] = manager
 

@@ -63,7 +63,7 @@ async def test_on_unavailable_and_non_matter(
     response = await _apply(hass, entity_id=[*BULBS, "light.hue"], brightness_pct=50)
     assert response["applied"] == ["light.bulb_1"]
     assert response["skipped"] == {"light.bulb_2": "on", "light.bulb_3": "unavailable"}
-    assert response["unsupported"] == {"light.hue": "not_matter"}
+    assert response["unsupported"] == {"light.hue": "unsupported_platform"}
     assert [c[0] for c in setup.commands] == ["light.bulb_1"]
 
 

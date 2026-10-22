@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from custom_components.preset_while_off.matter_backend import (
-    LightAttributes,
-    MatterLight,
-)
+from custom_components.preset_while_off.matter_backend import MatterLight
+from custom_components.preset_while_off.models import LightAttributes
 
 
 @dataclass
@@ -57,6 +56,13 @@ class FakeBackend:
     lights: dict[str, FakeLight] = field(default_factory=dict)
     commands: list[tuple[str, str, object]] = field(default_factory=list)
     available: bool = True
+    # Per-platform availability, as PresetBackend exposes it.
+    matter: SimpleNamespace = field(
+        default_factory=lambda: SimpleNamespace(available=True)
+    )
+    zha: SimpleNamespace = field(
+        default_factory=lambda: SimpleNamespace(available=False)
+    )
     on_level_callbacks: dict[str, Callable] = field(default_factory=dict)
     node_callbacks: list[Callable] = field(default_factory=list)
 
@@ -155,5 +161,5 @@ def no_matter_setup():
 def backend() -> FakeBackend:
     """Patch the integration to use a fake backend."""
     fake = FakeBackend()
-    with patch("custom_components.preset_while_off.MatterBackend", return_value=fake):
+    with patch("custom_components.preset_while_off.PresetBackend", return_value=fake):
         yield fake

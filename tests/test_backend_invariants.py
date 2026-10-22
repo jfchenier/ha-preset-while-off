@@ -62,7 +62,9 @@ def test_allowed_commands_exclude_on_off() -> None:
 def test_source_never_references_on_off_commands_or_options() -> None:
     forbidden = re.compile(
         r"WithOnOff|OnOff\.Commands|Commands\.(On|Off|Toggle)\b|"
-        r"Attributes\.Options\b|SERVICE_TURN_OFF|toggle"
+        r"Attributes\.Options\b|SERVICE_TURN_OFF|toggle|"
+        # ZHA / zigpy equivalents
+        r"with_on_off|on_with_|write_attributes\(\{[^}]*\"options\""
     )
     for path in SOURCE_DIR.glob("*.py"):
         assert not forbidden.search(path.read_text()), path.name
