@@ -29,6 +29,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
+from homeassistant.util import color as color_util
 
 from .const import (
     CAP_SUPPORTED,
@@ -44,10 +45,23 @@ from .const import (
     STORAGE_VERSION,
     VERIFY_DELAY,
 )
-from .matter_backend import MatterBackend, MatterLight, MatterUnavailable
+from .matter_backend import (
+    LightAttributes,
+    MatterBackend,
+    MatterLight,
+    MatterUnavailable,
+)
 
+# Capability parts, tracked separately per light.
 PART_LEVEL = "level"
 PART_COLOR_TEMP = "color_temp"
+PART_COLOR = "color"
+
+# Matter CurrentX/CurrentY are x * 65536, max 0xFEFF.
+XY_FACTOR = 65536
+XY_MAX = 0xFEFF
+# Matter hue and saturation are 0-254.
+HS_MAX = 254
 
 
 def _round_half_up(value: float) -> int:
@@ -82,6 +96,55 @@ def kelvin_to_mireds(
     if max_mireds:
         mireds = min(mireds, max_mireds)
     return mireds
+
+
+def xy_to_matter(xy: tuple[float, float]) -> tuple[int, int]:
+    """Convert CIE xy (0-1) to Matter CurrentX/CurrentY."""
+    return tuple(  # type: ignore[return-value]
+        max(0, min(XY_MAX, _round_half_up(v * XY_FACTOR))) for v in xy
+    )
+
+
+def hs_to_matter(hs: tuple[float, float]) -> tuple[int, int]:
+    """Convert HA hue (0-360) / saturation (0-100) to Matter (0-254)."""
+    hue = _round_half_up((hs[0] % 360) * HS_MAX / 360)
+    saturation = _round_half_up(hs[1] * HS_MAX / 100)
+    return min(hue, HS_MAX), max(0, min(saturation, HS_MAX))
+
+
+@dataclass(frozen=True, slots=True)
+class ColorPreset:
+    """A full color, kept in both xy and hs so each bulb gets what it supports."""
+
+    xy: tuple[float, float]
+    hs: tuple[float, float]
+    # The light.turn_on field and value the user gave, for apply_if_on.
+    turn_on_field: str
+    turn_on_value: tuple[float, ...]
+
+    @classmethod
+    def from_rgb(cls, rgb: tuple[int, int, int]) -> ColorPreset:
+        """Build from an RGB color."""
+        return cls(
+            color_util.color_RGB_to_xy(*rgb),
+            color_util.color_RGB_to_hs(*rgb),
+            "rgb_color",
+            tuple(rgb),
+        )
+
+    @classmethod
+    def from_hs(cls, hs: tuple[float, float]) -> ColorPreset:
+        """Build from hue (0-360) and saturation (0-100)."""
+        return cls(color_util.color_hs_to_xy(*hs), tuple(hs), "hs_color", tuple(hs))
+
+    @classmethod
+    def from_xy(cls, xy: tuple[float, float]) -> ColorPreset:
+        """Build from CIE xy."""
+        return cls(tuple(xy), color_util.color_xy_to_hs(*xy), "xy_color", tuple(xy))
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dict."""
+        return {self.turn_on_field: list(self.turn_on_value)}
 
 
 @callback
@@ -127,13 +190,31 @@ class ApplyResult:
         }
 
 
+def _current_value(attrs: LightAttributes, key: str) -> Any:
+    """Return the device value that a command of this kind changes."""
+    if key == "level":
+        return attrs.current_level
+    if key == "color_temp":
+        return attrs.color_temp_mireds
+    if key == "xy":
+        return (attrs.current_x, attrs.current_y)
+    return (attrs.current_hue, attrs.current_saturation)
+
+
+# Command kind -> capability part.
+_KIND_PART = {
+    "level": PART_LEVEL,
+    "color_temp": PART_COLOR_TEMP,
+    "xy": PART_COLOR,
+    "hs": PART_COLOR,
+}
+
+
 @dataclass
 class _Pending:
     light: MatterLight
-    level: int | None
-    level_before: int | None
-    mireds: int | None
-    mireds_before: int | None
+    # (kind, value sent, value before)
+    sent: list[tuple[str, Any, Any]]
 
 
 class PresetManager:
@@ -207,13 +288,17 @@ class PresetManager:
         level: int | None = None,
         brightness_pct: float | None = None,
         color_temp_kelvin: float | None = None,
+        color: ColorPreset | None = None,
         apply_if_on: bool = False,
         skip_if_unchanged: bool = False,
     ) -> ApplyResult:
         """Apply a preset to every resolved light that is off.
 
         `level` (Matter 0-254) takes precedence over `brightness_pct`.
+        `color_temp_kelvin` and `color` are mutually exclusive.
         """
+        if color_temp_kelvin is not None and color is not None:
+            raise ValueError("Use either a color temperature or a color, not both")
         if level is None and brightness_pct is not None:
             level = pct_to_level(brightness_pct)
         result = ApplyResult()
@@ -235,7 +320,12 @@ class PresetManager:
                     continue
                 try:
                     item = await self._apply_one(
-                        entity_id, level, color_temp_kelvin, skip_if_unchanged, result
+                        entity_id,
+                        level,
+                        color_temp_kelvin,
+                        color,
+                        skip_if_unchanged,
+                        result,
                     )
                 except MatterUnavailable as err:
                     result.skipped[entity_id] = f"matter_unavailable: {err}"
@@ -257,6 +347,8 @@ class PresetManager:
                 data[LIGHT_ATTR_BRIGHTNESS_PCT] = round(level * 100 / LEVEL_MAX, 1)
             if color_temp_kelvin is not None:
                 data[LIGHT_ATTR_COLOR_TEMP_KELVIN] = int(color_temp_kelvin)
+            if color is not None:
+                data[color.turn_on_field] = color.turn_on_value
             await self.hass.services.async_call(
                 LIGHT_DOMAIN, SERVICE_TURN_ON, data, blocking=True
             )
@@ -266,6 +358,7 @@ class PresetManager:
             self.last_results[entity_id] = {
                 "level": level,
                 "color_temp_kelvin": color_temp_kelvin,
+                "color": color.as_dict() if color else None,
                 "outcome": "applied"
                 if entity_id in result.applied
                 else result.skipped.get(entity_id)
@@ -279,6 +372,7 @@ class PresetManager:
         entity_id: str,
         level: int | None,
         kelvin: float | None,
+        color: ColorPreset | None,
         skip_if_unchanged: bool,
         result: ApplyResult,
     ) -> _Pending | None:
@@ -295,59 +389,64 @@ class PresetManager:
             result.skipped[entity_id] = "on"
             return None
 
-        send_level: int | None = None
-        if (
-            level is not None
-            and self.capability(entity_id, PART_LEVEL) != CAP_UNSUPPORTED
-        ):
-            send_level = clamp_level(level, attrs.min_level, attrs.max_level)
-        send_mireds: int | None = None
+        def allowed(part: str) -> bool:
+            return self.capability(entity_id, part) != CAP_UNSUPPORTED
+
+        # (kind, value) in send order: level first, then color.
+        commands: list[tuple[str, Any]] = []
+        if level is not None and allowed(PART_LEVEL):
+            commands.append(
+                ("level", clamp_level(level, attrs.min_level, attrs.max_level))
+            )
         if (
             kelvin is not None
             and attrs.supports_color_temp
-            and self.capability(entity_id, PART_COLOR_TEMP) != CAP_UNSUPPORTED
+            and allowed(PART_COLOR_TEMP)
         ):
-            send_mireds = kelvin_to_mireds(
-                kelvin, attrs.ct_min_mireds, attrs.ct_max_mireds
+            commands.append(
+                (
+                    "color_temp",
+                    kelvin_to_mireds(kelvin, attrs.ct_min_mireds, attrs.ct_max_mireds),
+                )
             )
+        if color is not None and allowed(PART_COLOR):
+            # Prefer xy: it's mandatory for Matter extended color lights.
+            if attrs.supports_xy:
+                commands.append(("xy", xy_to_matter(color.xy)))
+            elif attrs.supports_hs:
+                commands.append(("hs", hs_to_matter(color.hs)))
 
-        if send_level is None and send_mireds is None:
+        if not commands:
             result.unsupported[entity_id] = "no_supported_parts"
             return None
         if skip_if_unchanged:
-            if send_level == attrs.current_level:
-                send_level = None
-            if send_mireds == attrs.color_temp_mireds:
-                send_mireds = None
-            if send_level is None and send_mireds is None:
+            commands = [
+                (kind, value)
+                for kind, value in commands
+                if value != _current_value(attrs, kind)
+            ]
+            if not commands:
                 result.skipped[entity_id] = "unchanged"
                 return None
 
-        if send_level is not None:
-            await self.backend.move_to_level(light, send_level)
-            await asyncio.sleep(COMMAND_SPACING)
-        if send_mireds is not None:
-            await self.backend.move_to_color_temp(light, send_mireds)
+        for kind, value in commands:
+            if kind == "level":
+                await self.backend.move_to_level(light, value)
+            elif kind == "color_temp":
+                await self.backend.move_to_color_temp(light, value)
+            elif kind == "xy":
+                await self.backend.move_to_color_xy(light, *value)
+            else:
+                await self.backend.move_to_hue_saturation(light, *value)
             await asyncio.sleep(COMMAND_SPACING)
         result.applied.append(entity_id)
 
-        verify_level = (
-            send_level is not None
-            and self.capability(entity_id, PART_LEVEL) == CAP_UNKNOWN
-        )
-        verify_ct = (
-            send_mireds is not None
-            and self.capability(entity_id, PART_COLOR_TEMP) == CAP_UNKNOWN
-        )
-        if not (verify_level or verify_ct):
-            return None
-        return _Pending(
-            light,
-            send_level if verify_level else None,
-            attrs.current_level,
-            send_mireds if verify_ct else None,
-            attrs.color_temp_mireds,
-        )
+        to_verify = [
+            (kind, value, _current_value(attrs, kind))
+            for kind, value in commands
+            if self.capability(entity_id, _KIND_PART[kind]) == CAP_UNKNOWN
+        ]
+        return _Pending(light, to_verify) if to_verify else None
 
     async def _verify(self, pending: list[_Pending]) -> None:
         changed = False
@@ -360,21 +459,17 @@ class PresetManager:
             if attrs is None or attrs.on_off:
                 # Turned on meanwhile (or unknown): can't tell, try next time.
                 continue
-            for part, sent, before, now in (
-                (PART_LEVEL, item.level, item.level_before, attrs.current_level),
-                (
-                    PART_COLOR_TEMP,
-                    item.mireds,
-                    item.mireds_before,
-                    attrs.color_temp_mireds,
-                ),
-            ):
-                if sent is None or sent == before:
+            for kind, sent, before in item.sent:
+                if sent == before:
                     continue
-                if now == sent:
-                    changed |= self._set_capability(entity_id, part, CAP_SUPPORTED)
-                elif now == before:
+                part = _KIND_PART[kind]
+                now = _current_value(attrs, kind)
+                if now == before:
                     changed |= self._set_capability(entity_id, part, CAP_UNSUPPORTED)
+                elif now == sent or part == PART_COLOR:
+                    # Bulbs may move an out-of-gamut color into their gamut,
+                    # so any change counts for color.
+                    changed |= self._set_capability(entity_id, part, CAP_SUPPORTED)
         if changed:
             await self._store.async_save(self.capabilities)
             self._update_issue()

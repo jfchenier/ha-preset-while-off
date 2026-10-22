@@ -21,6 +21,20 @@ apply:
           unit: kelvin
           min: 2000
           max: 6500
+    rgb_color:
+      example: "[255, 100, 100]"
+      selector:
+        color_rgb:
+    hs_color:
+      advanced: true
+      example: "[300, 70]"
+      selector:
+        object:
+    xy_color:
+      advanced: true
+      example: "[0.52, 0.43]"
+      selector:
+        object:
     apply_if_on:
       default: false
       selector:

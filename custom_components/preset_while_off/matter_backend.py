@@ -4,8 +4,9 @@ Everything here uses internals of `homeassistant.components.matter` and the
 `matter_server` python client. They can change between HA releases, so keep all
 of that access in this one file.
 
-Safety invariant: this module can only send `MoveToLevel` and
-`MoveToColorTemperature`, always with ExecuteIfOff. It never sends anything that
+Safety invariant: this module can only send `MoveToLevel`,
+`MoveToColorTemperature`, `MoveToColor` (xy) and `MoveToHueAndSaturation`,
+always with ExecuteIfOff. It never sends anything that
 changes OnOff, and never writes the persistent `Options` attributes. The only
 attribute it writes is `OnLevel`, and only to null.
 """
@@ -35,12 +36,16 @@ from .const import LOGGER
 
 # ExecuteIfOff is bit 0 of the LevelControl and ColorControl options bitmaps.
 EXECUTE_IF_OFF = 1
-# ColorCapabilities bit 4: color temperature supported.
+# ColorCapabilities bits.
+COLOR_CAP_HUE_SATURATION = 0x01
+COLOR_CAP_XY = 0x08
 COLOR_CAP_COLOR_TEMPERATURE = 0x10
 
 ALLOWED_COMMANDS: tuple[type, ...] = (
     clusters.LevelControl.Commands.MoveToLevel,
     clusters.ColorControl.Commands.MoveToColorTemperature,
+    clusters.ColorControl.Commands.MoveToColor,
+    clusters.ColorControl.Commands.MoveToHueAndSaturation,
 )
 
 _ON_OFF = clusters.OnOff.Attributes.OnOff
@@ -52,9 +57,22 @@ _CT_MIREDS = clusters.ColorControl.Attributes.ColorTemperatureMireds
 _CT_MIN = clusters.ColorControl.Attributes.ColorTempPhysicalMinMireds
 _CT_MAX = clusters.ColorControl.Attributes.ColorTempPhysicalMaxMireds
 _COLOR_CAPS = clusters.ColorControl.Attributes.ColorCapabilities
+_CURRENT_X = clusters.ColorControl.Attributes.CurrentX
+_CURRENT_Y = clusters.ColorControl.Attributes.CurrentY
+_CURRENT_HUE = clusters.ColorControl.Attributes.CurrentHue
+_CURRENT_SATURATION = clusters.ColorControl.Attributes.CurrentSaturation
 
-# Attributes read back live after sending, for capability detection.
-_VERIFY_ATTRIBUTES = (_ON_OFF, _CURRENT_LEVEL, _CT_MIREDS)
+# Attributes read back live after sending, for capability detection,
+# mapped to the LightAttributes field they update.
+_VERIFY_ATTRIBUTES = {
+    _ON_OFF: "on_off",
+    _CURRENT_LEVEL: "current_level",
+    _CT_MIREDS: "color_temp_mireds",
+    _CURRENT_X: "current_x",
+    _CURRENT_Y: "current_y",
+    _CURRENT_HUE: "current_hue",
+    _CURRENT_SATURATION: "current_saturation",
+}
 
 
 class MatterUnavailable(Exception):
@@ -85,6 +103,12 @@ class LightAttributes:
     ct_min_mireds: int | None
     ct_max_mireds: int | None
     supports_color_temp: bool
+    current_x: int | None = None
+    current_y: int | None = None
+    current_hue: int | None = None
+    current_saturation: int | None = None
+    supports_xy: bool = False
+    supports_hs: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         """Return a dict for diagnostics."""
@@ -99,6 +123,12 @@ class LightAttributes:
             "ct_min_mireds": self.ct_min_mireds,
             "ct_max_mireds": self.ct_max_mireds,
             "supports_color_temp": self.supports_color_temp,
+            "current_x": self.current_x,
+            "current_y": self.current_y,
+            "current_hue": self.current_hue,
+            "current_saturation": self.current_saturation,
+            "supports_xy": self.supports_xy,
+            "supports_hs": self.supports_hs,
         }
 
 
@@ -122,6 +152,28 @@ def build_move_to_color_temp(mireds: int) -> clusters.ClusterCommand:
     """Build a MoveToColorTemperature command that executes while off."""
     return clusters.ColorControl.Commands.MoveToColorTemperature(
         colorTemperatureMireds=mireds,
+        transitionTime=0,
+        optionsMask=EXECUTE_IF_OFF,
+        optionsOverride=EXECUTE_IF_OFF,
+    )
+
+
+def build_move_to_color(x: int, y: int) -> clusters.ClusterCommand:
+    """Build a MoveToColor (CIE xy) command that executes while off."""
+    return clusters.ColorControl.Commands.MoveToColor(
+        colorX=x,
+        colorY=y,
+        transitionTime=0,
+        optionsMask=EXECUTE_IF_OFF,
+        optionsOverride=EXECUTE_IF_OFF,
+    )
+
+
+def build_move_to_hue_saturation(hue: int, saturation: int) -> clusters.ClusterCommand:
+    """Build a MoveToHueAndSaturation command that executes while off."""
+    return clusters.ColorControl.Commands.MoveToHueAndSaturation(
+        hue=hue,
+        saturation=saturation,
         transitionTime=0,
         optionsMask=EXECUTE_IF_OFF,
         optionsOverride=EXECUTE_IF_OFF,
@@ -206,7 +258,12 @@ class MatterBackend:
             return _null_to_none(endpoint.get_attribute_value(None, attribute))
 
         caps = get(_COLOR_CAPS)
-        has_ct = endpoint.has_attribute(None, _CT_MIREDS)
+
+        def supports(attribute: type, cap_bit: int) -> bool:
+            return endpoint.has_attribute(None, attribute) and (
+                caps is None or bool(caps & cap_bit)
+            )
+
         on_off = get(_ON_OFF)
         return LightAttributes(
             available=node.available,
@@ -219,35 +276,38 @@ class MatterBackend:
             color_temp_mireds=get(_CT_MIREDS),
             ct_min_mireds=get(_CT_MIN) or None,
             ct_max_mireds=get(_CT_MAX) or None,
-            supports_color_temp=has_ct
-            and (caps is None or bool(caps & COLOR_CAP_COLOR_TEMPERATURE)),
+            supports_color_temp=supports(_CT_MIREDS, COLOR_CAP_COLOR_TEMPERATURE),
+            current_x=get(_CURRENT_X),
+            current_y=get(_CURRENT_Y),
+            current_hue=get(_CURRENT_HUE),
+            current_saturation=get(_CURRENT_SATURATION),
+            supports_xy=supports(_CURRENT_X, COLOR_CAP_XY),
+            supports_hs=supports(_CURRENT_HUE, COLOR_CAP_HUE_SATURATION),
         )
 
     async def read_attributes(self, light: MatterLight) -> LightAttributes | None:
-        """Read OnOff, CurrentLevel and color temp live from the device.
+        """Read OnOff, CurrentLevel and the color attributes live from the device.
 
         Falls back to the cache if the live read fails.
         """
         client = self._client()
-        paths = [
-            create_attribute_path_from_attribute(light.endpoint_id, attr)
-            for attr in _VERIFY_ATTRIBUTES
-        ]
+        paths = {
+            create_attribute_path_from_attribute(light.endpoint_id, attr): name
+            for attr, name in _VERIFY_ATTRIBUTES.items()
+        }
         try:
-            values = await client.read_attribute(light.node_id, paths)
+            values = await client.read_attribute(light.node_id, list(paths))
         except Exception as err:  # noqa: BLE001
             LOGGER.debug("Live read failed for %s: %s", light.entity_id, err)
             values = {}
         attrs = self.get_attributes(light)
         if attrs is None:
             return None
-        on_off_path, level_path, ct_path = paths
-        if on_off_path in values:
-            attrs.on_off = bool(_null_to_none(values[on_off_path]))
-        if level_path in values:
-            attrs.current_level = _null_to_none(values[level_path])
-        if ct_path in values:
-            attrs.color_temp_mireds = _null_to_none(values[ct_path])
+        for path, name in paths.items():
+            if path in values:
+                setattr(attrs, name, _null_to_none(values[path]))
+        if attrs.on_off is not None:
+            attrs.on_off = bool(attrs.on_off)
         return attrs
 
     async def _send(self, light: MatterLight, command: clusters.ClusterCommand) -> None:
@@ -272,6 +332,16 @@ class MatterBackend:
     async def move_to_color_temp(self, light: MatterLight, mireds: int) -> None:
         """Set ColorTemperatureMireds without changing OnOff."""
         await self._send(light, build_move_to_color_temp(mireds))
+
+    async def move_to_color_xy(self, light: MatterLight, x: int, y: int) -> None:
+        """Set CurrentX/CurrentY without changing OnOff."""
+        await self._send(light, build_move_to_color(x, y))
+
+    async def move_to_hue_saturation(
+        self, light: MatterLight, hue: int, saturation: int
+    ) -> None:
+        """Set CurrentHue/CurrentSaturation without changing OnOff."""
+        await self._send(light, build_move_to_hue_saturation(hue, saturation))
 
     async def clear_on_level(self, light: MatterLight) -> None:
         """Write OnLevel = null."""

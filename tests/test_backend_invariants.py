@@ -12,7 +12,9 @@ from custom_components.preset_while_off.matter_backend import (
     ALLOWED_COMMANDS,
     MatterBackend,
     MatterLight,
+    build_move_to_color,
     build_move_to_color_temp,
+    build_move_to_hue_saturation,
     build_move_to_level,
 )
 
@@ -32,6 +34,19 @@ def test_builders_use_execute_if_off() -> None:
     assert type(ct) is clusters.ColorControl.Commands.MoveToColorTemperature
     assert (ct.colorTemperatureMireds, ct.optionsMask, ct.optionsOverride) == (
         204,
+        1,
+        1,
+    )
+
+    xy = build_move_to_color(32768, 26214)
+    assert type(xy) is clusters.ColorControl.Commands.MoveToColor
+    assert (xy.colorX, xy.colorY, xy.transitionTime) == (32768, 26214, 0)
+    assert (xy.optionsMask, xy.optionsOverride) == (1, 1)
+    hs = build_move_to_hue_saturation(127, 254)
+    assert type(hs) is clusters.ColorControl.Commands.MoveToHueAndSaturation
+    assert (hs.hue, hs.saturation, hs.optionsMask, hs.optionsOverride) == (
+        127,
+        254,
         1,
         1,
     )
@@ -98,14 +113,17 @@ async def test_clear_on_level_writes_null() -> None:
 
 async def test_resolve_parses_endpoint_from_unique_id(hass) -> None:
     """unique_id format seen on the owner's HA for branch lamp bulb 1 (node 72)."""
-    from homeassistant.helpers import device_registry as dr, entity_registry as er
+    from homeassistant.helpers import device_registry as dr
+    from homeassistant.helpers import entity_registry as er
     from pytest_homeassistant_custom_component.common import MockConfigEntry
 
     config_entry = MockConfigEntry(domain="matter")
     config_entry.add_to_hass(hass)
     device = dr.async_get(hass).async_get_or_create(
         config_entry_id=config_entry.entry_id,
-        identifiers={("matter", "deviceid_B6F01A71A78EA9B0-0000000000000048-MatterNodeDevice")},
+        identifiers={
+            ("matter", "deviceid_B6F01A71A78EA9B0-0000000000000048-MatterNodeDevice")
+        },
     )
     er.async_get(hass).async_get_or_create(
         "light",

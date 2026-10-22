@@ -21,6 +21,9 @@ class FakeLight:
     attrs: LightAttributes
     honors_level_while_off: bool = True
     honors_ct_while_off: bool = True
+    honors_color_while_off: bool = True
+    # Simulates a bulb moving an out-of-gamut xy color into its gamut.
+    gamut_clamp: Callable | None = None
 
 
 def make_attrs(**kwargs) -> LightAttributes:
@@ -37,6 +40,12 @@ def make_attrs(**kwargs) -> LightAttributes:
         ct_min_mireds=153,
         ct_max_mireds=454,
         supports_color_temp=True,
+        current_x=24939,
+        current_y=24701,
+        current_hue=0,
+        current_saturation=0,
+        supports_xy=False,
+        supports_hs=False,
     )
     return replace(base, **kwargs)
 
@@ -85,6 +94,24 @@ class FakeBackend:
         fake = self.lights[light.entity_id]
         if fake.honors_ct_while_off or fake.attrs.on_off:
             fake.attrs.color_temp_mireds = mireds
+
+    async def move_to_color_xy(self, light: MatterLight, x: int, y: int) -> None:
+        self.commands.append((light.entity_id, "MoveToColor", (x, y)))
+        fake = self.lights[light.entity_id]
+        if fake.honors_color_while_off or fake.attrs.on_off:
+            if fake.gamut_clamp:
+                x, y = fake.gamut_clamp(x, y)
+            fake.attrs.current_x, fake.attrs.current_y = x, y
+
+    async def move_to_hue_saturation(
+        self, light: MatterLight, hue: int, saturation: int
+    ) -> None:
+        self.commands.append(
+            (light.entity_id, "MoveToHueAndSaturation", (hue, saturation))
+        )
+        fake = self.lights[light.entity_id]
+        if fake.honors_color_while_off or fake.attrs.on_off:
+            fake.attrs.current_hue, fake.attrs.current_saturation = hue, saturation
 
     async def clear_on_level(self, light: MatterLight) -> None:
         self.commands.append((light.entity_id, "ClearOnLevel", None))

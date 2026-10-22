@@ -133,3 +133,103 @@ async def test_unknown_when_value_already_matches(
     setup.lights["light.bulb_1"].attrs.current_level = 64
     await _apply(hass, entity_id="light.bulb_1", brightness_pct=25)
     assert "level" not in hass.data[DOMAIN].capabilities.get("light.bulb_1", {})
+
+
+@pytest.fixture
+async def color_setup(hass: HomeAssistant, backend: FakeBackend) -> FakeBackend:
+    backend.add("light.xy", 1, attrs={"supports_xy": True, "supports_hs": True})
+    backend.add("light.hs", 2, attrs={"supports_hs": True})
+    backend.add("light.ws", 3)
+    for entity_id in ("light.xy", "light.hs", "light.ws"):
+        hass.states.async_set(entity_id, "off")
+    assert await async_setup_component(hass, DOMAIN, {DOMAIN: {}})
+    return backend
+
+
+async def test_apply_xy_color(hass: HomeAssistant, color_setup: FakeBackend) -> None:
+    response = await _apply(
+        hass,
+        entity_id=["light.xy", "light.hs", "light.ws"],
+        brightness_pct=25,
+        xy_color=[0.5, 0.4],
+    )
+    assert response["applied"] == ["light.hs", "light.ws", "light.xy"]
+    hs_command = color_setup.commands[1]
+    assert color_setup.commands == [
+        ("light.hs", "MoveToLevel", 64),
+        # Hue/saturation only: converted from the same color.
+        ("light.hs", "MoveToHueAndSaturation", hs_command[2]),
+        # No color support: brightness only.
+        ("light.ws", "MoveToLevel", 64),
+        ("light.xy", "MoveToLevel", 64),
+        # xy preferred when supported.
+        ("light.xy", "MoveToColor", (32768, 26214)),
+    ]
+    caps = hass.data[DOMAIN].capabilities
+    assert caps["light.xy"]["color"] == "supported"
+    assert caps["light.hs"]["color"] == "supported"
+    assert "color" not in caps["light.ws"]
+
+
+async def test_apply_rgb_color(hass: HomeAssistant, color_setup: FakeBackend) -> None:
+    await _apply(hass, entity_id="light.xy", rgb_color=[255, 0, 0])
+    ((entity_id, command, (x, y)),) = color_setup.commands
+    assert (entity_id, command) == ("light.xy", "MoveToColor")
+    assert x > 0.6 * 65536 and y < 0.35 * 65536
+
+
+async def test_apply_hs_color(hass: HomeAssistant, color_setup: FakeBackend) -> None:
+    await _apply(hass, entity_id="light.hs", hs_color=[180, 50])
+    assert color_setup.commands == [("light.hs", "MoveToHueAndSaturation", (127, 127))]
+
+
+async def test_color_only_unsupported_light(
+    hass: HomeAssistant, color_setup: FakeBackend
+) -> None:
+    response = await _apply(hass, entity_id="light.ws", rgb_color=[255, 0, 0])
+    assert response["unsupported"] == {"light.ws": "no_supported_parts"}
+    assert color_setup.commands == []
+
+
+async def test_color_and_kelvin_exclusive(
+    hass: HomeAssistant, color_setup: FakeBackend
+) -> None:
+    with pytest.raises(vol.Invalid):
+        await _apply(
+            hass, entity_id="light.xy", rgb_color=[255, 0, 0], color_temp_kelvin=3000
+        )
+
+
+async def test_color_gamut_clamp_counts_as_supported(
+    hass: HomeAssistant, color_setup: FakeBackend
+) -> None:
+    color_setup.lights["light.xy"].gamut_clamp = lambda x, y: (x - 500, y + 300)
+    await _apply(hass, entity_id="light.xy", xy_color=[0.5, 0.4])
+    assert hass.data[DOMAIN].capabilities["light.xy"]["color"] == "supported"
+
+
+async def test_color_ignored_while_off(
+    hass: HomeAssistant, color_setup: FakeBackend
+) -> None:
+    color_setup.lights["light.xy"].honors_color_while_off = False
+    await _apply(hass, entity_id="light.xy", brightness_pct=50, rgb_color=[0, 0, 255])
+    assert hass.data[DOMAIN].capabilities["light.xy"] == {
+        "level": "supported",
+        "color": "unsupported",
+    }
+    color_setup.commands.clear()
+    await _apply(hass, entity_id="light.xy", brightness_pct=60, rgb_color=[0, 0, 255])
+    assert [c[1] for c in color_setup.commands] == ["MoveToLevel"]
+
+
+async def test_apply_if_on_passes_color(
+    hass: HomeAssistant, color_setup: FakeBackend
+) -> None:
+    calls = async_mock_service(hass, "light", "turn_on")
+    hass.states.async_set("light.xy", "on")
+    response = await _apply(
+        hass, entity_id="light.xy", rgb_color=[255, 100, 0], apply_if_on=True
+    )
+    assert response["applied_on"] == ["light.xy"]
+    assert calls[0].data == {"entity_id": ["light.xy"], "rgb_color": (255, 100, 0)}
+    assert color_setup.commands == []

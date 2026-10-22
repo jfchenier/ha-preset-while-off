@@ -14,6 +14,9 @@ SERVICE_APPLY: Final = "apply"
 ATTR_BRIGHTNESS_PCT: Final = "brightness_pct"
 ATTR_BRIGHTNESS: Final = "brightness"
 ATTR_COLOR_TEMP_KELVIN: Final = "color_temp_kelvin"
+ATTR_RGB_COLOR: Final = "rgb_color"
+ATTR_HS_COLOR: Final = "hs_color"
+ATTR_XY_COLOR: Final = "xy_color"
 ATTR_APPLY_IF_ON: Final = "apply_if_on"
 
 # Config entry options

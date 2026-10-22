@@ -1,4 +1,4 @@
-"""Preset While Off: set brightness and color temperature of Matter lights while off."""
+"""Preset While Off: set brightness and color of Matter lights while they are off."""
 
 from __future__ import annotations
 
@@ -20,12 +20,21 @@ from .const import (
     ATTR_BRIGHTNESS,
     ATTR_BRIGHTNESS_PCT,
     ATTR_COLOR_TEMP_KELVIN,
+    ATTR_HS_COLOR,
+    ATTR_RGB_COLOR,
+    ATTR_XY_COLOR,
     DOMAIN,
     SERVICE_APPLY,
 )
 from .coordinator import RuleCoordinator
 from .matter_backend import MatterBackend
-from .preset import PresetManager, brightness_to_level, expand_lights, pct_to_level
+from .preset import (
+    ColorPreset,
+    PresetManager,
+    brightness_to_level,
+    expand_lights,
+    pct_to_level,
+)
 
 SERVICE_RESET_CAPABILITIES = "reset_capabilities"
 
@@ -41,14 +50,35 @@ APPLY_SCHEMA = vol.All(
             vol.Exclusive(ATTR_BRIGHTNESS, "brightness"): vol.All(
                 vol.Coerce(int), vol.Range(min=1, max=255)
             ),
-            vol.Optional(ATTR_COLOR_TEMP_KELVIN): vol.All(
+            # One color setting at most: a color temperature or a full color.
+            vol.Exclusive(ATTR_COLOR_TEMP_KELVIN, "color"): vol.All(
                 vol.Coerce(int), vol.Range(min=1000, max=20000)
+            ),
+            vol.Exclusive(ATTR_RGB_COLOR, "color"): vol.All(
+                vol.Coerce(tuple), vol.ExactSequence((cv.byte,) * 3)
+            ),
+            vol.Exclusive(ATTR_HS_COLOR, "color"): vol.All(
+                vol.Coerce(tuple),
+                vol.ExactSequence(
+                    (
+                        vol.All(vol.Coerce(float), vol.Range(min=0, max=360)),
+                        vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
+                    )
+                ),
+            ),
+            vol.Exclusive(ATTR_XY_COLOR, "color"): vol.All(
+                vol.Coerce(tuple), vol.ExactSequence((cv.small_float,) * 2)
             ),
             vol.Optional(ATTR_APPLY_IF_ON, default=False): cv.boolean,
         }
     ),
     cv.has_at_least_one_key(
-        ATTR_BRIGHTNESS_PCT, ATTR_BRIGHTNESS, ATTR_COLOR_TEMP_KELVIN
+        ATTR_BRIGHTNESS_PCT,
+        ATTR_BRIGHTNESS,
+        ATTR_COLOR_TEMP_KELVIN,
+        ATTR_RGB_COLOR,
+        ATTR_HS_COLOR,
+        ATTR_XY_COLOR,
     ),
 )
 
@@ -79,10 +109,18 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             level = pct_to_level(pct)
         elif (brightness := call.data.get(ATTR_BRIGHTNESS)) is not None:
             level = brightness_to_level(brightness)
+        color = None
+        if (rgb := call.data.get(ATTR_RGB_COLOR)) is not None:
+            color = ColorPreset.from_rgb(rgb)
+        elif (hs := call.data.get(ATTR_HS_COLOR)) is not None:
+            color = ColorPreset.from_hs(hs)
+        elif (xy := call.data.get(ATTR_XY_COLOR)) is not None:
+            color = ColorPreset.from_xy(xy)
         result = await manager.async_apply(
             sorted(entity_ids),
             level=level,
             color_temp_kelvin=call.data.get(ATTR_COLOR_TEMP_KELVIN),
+            color=color,
             apply_if_on=call.data[ATTR_APPLY_IF_ON],
         )
         return result.as_dict()

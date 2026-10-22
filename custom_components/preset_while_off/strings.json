@@ -81,7 +81,7 @@
   "services": {
     "apply": {
       "name": "Apply preset while off",
-      "description": "Sets brightness and/or color temperature on Matter lights that are off, without turning them on.",
+      "description": "Sets brightness, color temperature or full color on Matter lights that are off, without turning them on.",
       "fields": {
         "brightness_pct": {
           "name": "Brightness",
@@ -93,7 +93,19 @@
         },
         "color_temp_kelvin": {
           "name": "Color temperature",
-          "description": "Color temperature in Kelvin."
+          "description": "Color temperature in Kelvin. Can't be combined with a full color."
+        },
+        "rgb_color": {
+          "name": "Color",
+          "description": "Full color as [R, G, B]. Can't be combined with a color temperature."
+        },
+        "hs_color": {
+          "name": "Hue/saturation color",
+          "description": "Full color as [hue 0-360, saturation 0-100]."
+        },
+        "xy_color": {
+          "name": "XY color",
+          "description": "Full color as CIE [x, y]."
         },
         "apply_if_on": {
           "name": "Apply if on",
@@ -109,7 +121,7 @@
   "issues": {
     "unsupported_lights": {
       "title": "Some lights ignore presets while off",
-      "description": "These lights did not change while off, so presets are no longer sent for the listed parts:\n\n{lights}\n\nUse the `preset_while_off.reset_capabilities` action to test them again."
+      "description": "These lights did not change while off, so presets are no longer sent for the listed parts (level, color_temp, color):\n\n{lights}\n\nUse the `preset_while_off.reset_capabilities` action to test them again."
     },
     "on_level_rewritten": {
       "title": "OnLevel keeps being rewritten",

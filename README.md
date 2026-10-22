@@ -1,11 +1,12 @@
 # Preset While Off
 
-A Home Assistant custom integration that sets the **brightness and color temperature
-of Matter lights while they are off**, so they turn on directly at the right values.
+A Home Assistant custom integration that sets the **brightness and color (color
+temperature or full color) of Matter lights while they are off**, so they turn on directly at the right values.
 This works even when they're turned on by a wall switch bound directly to the bulbs.
 
-It uses the Matter `ExecuteIfOff` option on each command (`MoveToLevel` and
-`MoveToColorTemperature` with `optionsMask=1, optionsOverride=1`). It never sends `On`,
+It uses the Matter `ExecuteIfOff` option on each command (`MoveToLevel`,
+`MoveToColorTemperature`, `MoveToColor` and `MoveToHueAndSaturation`, all with
+`optionsMask=1, optionsOverride=1`). It never sends `On`,
 `Off`, `Toggle` or `MoveToLevelWithOnOff`, and never writes the persistent `Options`
 attributes. **It never turns a light on or off.**
 
@@ -31,7 +32,7 @@ target:
   entity_id: light.branch_lamp   # light groups are expanded to their members
 data:
   brightness_pct: 25             # or brightness: 1-255
-  color_temp_kelvin: 4890
+  color_temp_kelvin: 4890        # or a full color, see below
   apply_if_on: false             # true: lights that are on get light.turn_on instead
 response_variable: result
 ```
@@ -43,6 +44,25 @@ response_variable: result
 
 The response lists the lights under `applied`, `applied_on`, `skipped` (with a
 reason) and `unsupported`.
+
+### Full color
+
+Instead of `color_temp_kelvin`, give one of:
+
+- `rgb_color: [255, 100, 0]`
+- `hs_color: [30, 100]` (hue 0–360, saturation 0–100)
+- `xy_color: [0.6, 0.38]`
+
+You can't combine a color temperature and a full color in one call.
+
+- Lights that support CIE xy get `MoveToColor`.
+- Lights with only hue/saturation get `MoveToHueAndSaturation`, converted from the
+  same color.
+- Lights without full color get only the brightness. If no brightness was given,
+  they're listed as unsupported.
+
+Some bulbs move a color they can't show to the nearest one they can. Any change
+while off counts as supported.
 
 Brightness is converted to a Matter level and clamped to `max(MinLevel,1)`–`min(MaxLevel,254)`.
 It never sends 255. Kelvin is converted to mireds and clamped to the bulb's physical range.
@@ -84,7 +104,8 @@ If an automation writes `number.*_on_level` for these lights, disable it for the
 ## Capability detection
 
 The first time a light gets a preset, the integration reads back `OnOff`, `CurrentLevel`
-and `ColorTemperatureMireds` about 1 s later.
+and the color attributes about 1 s later. Level, color temperature and full color
+are tracked separately.
 
 - **Value changed while off:** that part is marked supported.
 - **Value unchanged:** that part is marked unsupported and no longer sent. A repair
