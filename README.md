@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="custom_components/preset_while_off/brand/dark_logo@2x.png">
+  <img alt="Preset While Off" src="custom_components/preset_while_off/brand/logo@2x.png" height="96">
+</picture>
+
 # Preset While Off
 
 A Home Assistant custom integration that sets the **brightness and color (color
