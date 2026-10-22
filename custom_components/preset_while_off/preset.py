@@ -388,8 +388,14 @@ class PresetManager:
             result.skipped[entity_id] = "unavailable"
             return None
         if attrs.on_off:
-            result.skipped[entity_id] = "on"
-            return None
+            # HA says off but the cache says on. The cache can lag: ZHA marks
+            # a light off right after its own off command, before the bulb
+            # reports it. Ask the bulb before skipping.
+            fresh = await self.backend.read_attributes(light)
+            if fresh is None or fresh.on_off is not False:
+                result.skipped[entity_id] = "on"
+                return None
+            attrs = fresh
 
         def allowed(part: str) -> bool:
             return self.capability(entity_id, part) != CAP_UNSUPPORTED

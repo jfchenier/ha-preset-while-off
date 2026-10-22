@@ -256,3 +256,31 @@ async def test_unreadable_light_stays_unknown(
     setup.read_attributes = unreadable
     await _apply(hass, entity_id="light.bulb_1", brightness_pct=25)
     assert "level" not in hass.data[DOMAIN].capabilities.get("light.bulb_1", {})
+
+
+async def test_stale_on_cache_is_rechecked_live(
+    hass: HomeAssistant, setup: FakeBackend
+) -> None:
+    """HA says off but the cache still says on: read live before skipping."""
+    fake = setup.lights["light.bulb_1"]
+    fake.attrs.on_off = True  # stale cache
+    cached = setup.get_attributes
+
+    async def live_read(light):
+        fake.attrs.on_off = False  # the bulb reports it is off
+        return cached(light)
+
+    setup.read_attributes = live_read
+    response = await _apply(hass, entity_id="light.bulb_1", brightness_pct=25)
+    assert response["applied"] == ["light.bulb_1"]
+    assert setup.commands == [("light.bulb_1", "MoveToLevel", 64)]
+
+
+async def test_really_on_is_skipped_after_live_read(
+    hass: HomeAssistant, setup: FakeBackend
+) -> None:
+    """If the live read confirms the bulb is on, nothing is sent."""
+    setup.lights["light.bulb_1"].attrs.on_off = True
+    response = await _apply(hass, entity_id="light.bulb_1", brightness_pct=25)
+    assert response["skipped"] == {"light.bulb_1": "on"}
+    assert setup.commands == []
