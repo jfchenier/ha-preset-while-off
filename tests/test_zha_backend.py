@@ -254,3 +254,14 @@ async def test_expand_zha_group(hass: HomeAssistant) -> None:
         {"group_entities": ["light.stairs_1", "light.stairs_2"]},
     )
     assert expand_lights(hass, ["light.stairs"]) == ["light.stairs_1", "light.stairs_2"]
+
+
+async def test_read_failure_returns_none(zigbee) -> None:
+    """A failed read must not be mistaken for an ignored command."""
+    backend, clusters = zigbee
+
+    async def fail(*args, **kwargs):
+        raise TimeoutError
+
+    clusters[COLOR_CLUSTER].read_attributes = fail
+    assert await backend.read_attributes(LIGHT) is None

@@ -202,7 +202,9 @@ class ZhaBackend:
     async def read_attributes(self, light: ZhaLight) -> LightAttributes | None:
         """Read on/off, level and color live from the bulb.
 
-        Falls back to the cache if the read fails (sleepy or slow device).
+        Returns None if a read fails (sleepy or slow device): the cache may
+        still hold the pre-command values, which would look like an ignored
+        command.
         """
         _device, *clusters = self._clusters(light)
         for cluster in clusters:
@@ -213,6 +215,7 @@ class ZhaBackend:
                 await cluster.read_attributes(names, allow_cache=False)
             except Exception as err:  # noqa: BLE001 - zigpy raises many types
                 LOGGER.debug("Live read failed for %s: %s", light.entity_id, err)
+                return None
         return self.get_attributes(light)
 
     async def _send(

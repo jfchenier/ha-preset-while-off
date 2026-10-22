@@ -242,3 +242,17 @@ async def test_reset_without_target_resets_all(
     assert len(hass.data[DOMAIN].capabilities) == 2
     await hass.services.async_call(DOMAIN, "reset_capabilities", {}, blocking=True)
     assert hass.data[DOMAIN].capabilities == {}
+
+
+async def test_unreadable_light_stays_unknown(
+    hass: HomeAssistant, setup: FakeBackend
+) -> None:
+    """If the read-back fails, capability stays unknown instead of unsupported."""
+    setup.lights["light.bulb_1"].honors_level_while_off = False
+
+    async def unreadable(light):
+        return None
+
+    setup.read_attributes = unreadable
+    await _apply(hass, entity_id="light.bulb_1", brightness_pct=25)
+    assert "level" not in hass.data[DOMAIN].capabilities.get("light.bulb_1", {})

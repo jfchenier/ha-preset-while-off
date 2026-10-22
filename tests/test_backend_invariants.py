@@ -148,3 +148,11 @@ async def test_resolve_parses_endpoint_from_unique_id(hass) -> None:
     ):
         assert backend.resolve("light.bulb_1") == MatterLight("light.bulb_1", 72, 1)
         assert backend.resolve("light.unknown") is None
+
+
+async def test_matter_read_failure_returns_none() -> None:
+    """A failed live read must not fall back to possibly stale cached values."""
+    backend = MatterBackend(MagicMock())
+    client = MagicMock(read_attribute=AsyncMock(side_effect=TimeoutError))
+    with patch.object(backend, "_client", return_value=client):
+        assert await backend.read_attributes(MatterLight("light.x", 72, 1)) is None

@@ -245,7 +245,8 @@ class MatterBackend:
     async def read_attributes(self, light: MatterLight) -> LightAttributes | None:
         """Read OnOff, CurrentLevel and the color attributes live from the device.
 
-        Falls back to the cache if the live read fails.
+        Returns None if the live read fails: the cache may still hold the
+        pre-command values, which would look like an ignored command.
         """
         client = self._client()
         paths = {
@@ -256,7 +257,7 @@ class MatterBackend:
             values = await client.read_attribute(light.node_id, list(paths))
         except Exception as err:  # noqa: BLE001
             LOGGER.debug("Live read failed for %s: %s", light.entity_id, err)
-            values = {}
+            return None
         attrs = self.get_attributes(light)
         if attrs is None:
             return None
