@@ -1,0 +1,124 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "New preset rule",
+        "description": "Keep these lights preset to a source while they are off, so they turn on directly at the right brightness and color temperature.",
+        "data": {
+          "name": "Name",
+          "lights": "Lights",
+          "source_type": "Source"
+        },
+        "data_description": {
+          "lights": "Matter lights or light groups. Groups are expanded to their members."
+        }
+      },
+      "source_adaptive_lighting": {
+        "title": "Adaptive Lighting source",
+        "data": {
+          "adaptive_lighting_switch": "Adaptive Lighting switch"
+        },
+        "data_description": {
+          "adaptive_lighting_switch": "Its brightness_pct and color_temp_kelvin attributes are used."
+        }
+      },
+      "source_entities": {
+        "title": "Entity source",
+        "data": {
+          "brightness_entity": "Brightness entity (%)",
+          "color_temp_entity": "Color temperature entity (K)"
+        }
+      },
+      "settings": {
+        "title": "Settings",
+        "data": {
+          "sync_brightness": "Sync brightness",
+          "sync_color_temp": "Sync color temperature",
+          "clear_on_level": "Clear OnLevel on managed lights",
+          "interval_minutes": "Safety re-apply interval"
+        },
+        "data_description": {
+          "clear_on_level": "A non-null OnLevel makes some bulbs flash to 100% on turn-on. Recommended."
+        }
+      }
+    },
+    "error": {
+      "no_lights": "Select at least one light.",
+      "no_source_entity": "Select at least one source entity.",
+      "nothing_to_sync": "Enable brightness, color temperature, or both."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Edit preset rule",
+        "data": {
+          "lights": "Lights",
+          "adaptive_lighting_switch": "Adaptive Lighting switch",
+          "brightness_entity": "Brightness entity (%)",
+          "color_temp_entity": "Color temperature entity (K)",
+          "sync_brightness": "Sync brightness",
+          "sync_color_temp": "Sync color temperature",
+          "clear_on_level": "Clear OnLevel on managed lights",
+          "interval_minutes": "Safety re-apply interval"
+        }
+      }
+    },
+    "error": {
+      "no_lights": "Select at least one light.",
+      "no_source_entity": "Select at least one source entity.",
+      "nothing_to_sync": "Enable brightness, color temperature, or both."
+    }
+  },
+  "selector": {
+    "source_type": {
+      "options": {
+        "adaptive_lighting": "Adaptive Lighting switch",
+        "entities": "Separate brightness / color temperature entities"
+      }
+    }
+  },
+  "services": {
+    "apply": {
+      "name": "Apply preset while off",
+      "description": "Sets brightness and/or color temperature on Matter lights that are off, without turning them on.",
+      "fields": {
+        "brightness_pct": {
+          "name": "Brightness",
+          "description": "Brightness in percent."
+        },
+        "brightness": {
+          "name": "Brightness value",
+          "description": "Brightness from 1 to 255, like light.turn_on."
+        },
+        "color_temp_kelvin": {
+          "name": "Color temperature",
+          "description": "Color temperature in Kelvin."
+        },
+        "apply_if_on": {
+          "name": "Apply if on",
+          "description": "For lights that are on, call light.turn_on with these values instead of skipping them."
+        }
+      }
+    },
+    "reset_capabilities": {
+      "name": "Reset capabilities",
+      "description": "Forgets which lights were detected as not supporting presets while off, so they are tested again. Without a target, resets all lights."
+    }
+  },
+  "issues": {
+    "unsupported_lights": {
+      "title": "Some lights ignore presets while off",
+      "description": "These lights did not change while off, so presets are no longer sent for the listed parts:\n\n{lights}\n\nUse the `preset_while_off.reset_capabilities` action to test them again."
+    },
+    "on_level_rewritten": {
+      "title": "OnLevel keeps being rewritten",
+      "description": "Something else keeps writing OnLevel on lights managed by rule \"{rule}\": {lights}. A non-null OnLevel brings back the flash on turn-on. Disable automations that write `number.*_on_level` for these lights."
+    }
+  },
+  "exceptions": {
+    "no_lights": {
+      "message": "No lights were targeted."
+    }
+  }
+}
