@@ -82,7 +82,8 @@ APPLY_SCHEMA = vol.All(
     ),
 )
 
-RESET_SCHEMA = cv.make_entity_service_schema({})
+# No target resets every light.
+RESET_SCHEMA = vol.Schema(cv.ENTITY_SERVICE_FIELDS)
 
 type PresetConfigEntry = ConfigEntry[RuleCoordinator]
 

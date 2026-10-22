@@ -233,3 +233,12 @@ async def test_apply_if_on_passes_color(
     assert response["applied_on"] == ["light.xy"]
     assert calls[0].data == {"entity_id": ["light.xy"], "rgb_color": (255, 100, 0)}
     assert color_setup.commands == []
+
+
+async def test_reset_without_target_resets_all(
+    hass: HomeAssistant, setup: FakeBackend
+) -> None:
+    await _apply(hass, entity_id=BULBS[:2], brightness_pct=25)
+    assert len(hass.data[DOMAIN].capabilities) == 2
+    await hass.services.async_call(DOMAIN, "reset_capabilities", {}, blocking=True)
+    assert hass.data[DOMAIN].capabilities == {}
